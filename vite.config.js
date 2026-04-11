@@ -1,9 +1,8 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  // GitHub Pagesのサブディレクトリ用設定
-  base: '/neotetra/', 
+  // GitHub PagesのURL階層に合わせるための設定
+  base: '/neotetra/',
 })
