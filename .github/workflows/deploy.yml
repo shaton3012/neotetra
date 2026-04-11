@@ -30,11 +30,13 @@ jobs:
       - name: Install dependencies
         run: |
           npm install
-          # Tailwind v4用のPostCSSプラグインを明示的に追加します
           npm install -D @tailwindcss/postcss postcss autoprefixer
 
       - name: Build
-        run: npm run build
+        run: |
+          # 競合の原因になる可能性のある設定ファイルを削除（ビルド時のみ）
+          rm -f postcss.config.js tailwind.config.js
+          npm run build
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
