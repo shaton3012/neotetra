@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Play, Pause, RotateCcw, Volume2, VolumeX, Terminal, Bomb } from 'lucide-react';
+import { Play, Pause, RotateCcw, Volume2, VolumeX, Terminal, Bomb, Trophy } from 'lucide-react';
 
 const COLS = 10;
 const ROWS = 20;
@@ -19,9 +19,13 @@ const SHAPES = {
   Z: [[1, 1, 0], [0, 1, 1], [0, 0, 0]],
 };
 
+// Bag system for even distribution of blocks
+let pieceBag = [];
 const RANDOM_TETROMINO = () => {
-  const keys = Object.keys(SHAPES);
-  return keys[Math.floor(Math.random() * keys.length)];
+  if (pieceBag.length === 0) {
+    pieceBag = Object.keys(SHAPES).sort(() => Math.random() - 0.5);
+  }
+  return pieceBag.pop();
 };
 
 const TerminalLog = ({ logs }) => (
@@ -48,14 +52,20 @@ const App = () => {
   const [gameOver, setGameOver] = useState(false);
   const [gameClear, setGameClear] = useState(false);
   const [isExtraStage, setIsExtraStage] = useState(false);
+  const [extraUnlocked, setExtraUnlocked] = useState(false);
   const [isPaused, setIsPaused] = useState(false); 
+  const [isStarting, setIsStarting] = useState(false);
   const [particles, setParticles] = useState([]);
   const [flashes, setFlashes] = useState([]);
   const [feedback, setFeedback] = useState(null); 
   const [isShaking, setIsShaking] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  
+  // Extra Stage Roulette State
+  const [rouletteState, setRouletteState] = useState({ active: false, piece: null, remaining: 0, nextTrigger: 5 });
+
   const [logs, setLogs] = useState([
-    { msg: "CITY PROTOCOL v2.3 ONLINE", type: "success", time: Date.now() },
+    { msg: "CITY PROTOCOL v2.4 ONLINE", type: "success", time: Date.now() },
     { msg: "AWAITING INPUT...", type: "info", time: Date.now() }
   ]);
 
@@ -70,10 +80,16 @@ const App = () => {
   const lastBombScoreRef = useRef(0);
   const lastRepairScoreRef = useRef(0);
 
-  const stateRef = useRef({ grid, activePiece, nextPiece, gameOver, gameClear, isExtraStage, turnCount, isPaused, level, isMuted, linesCleared, bombs, score, combo });
+  const stateRef = useRef({ grid, activePiece, nextPiece, gameOver, gameClear, isExtraStage, turnCount, isPaused, level, isMuted, linesCleared, bombs, score, combo, isStarting, rouletteState });
+  
   useEffect(() => {
-    stateRef.current = { grid, activePiece, nextPiece, gameOver, gameClear, isExtraStage, turnCount, isPaused, level, isMuted, linesCleared, bombs, score, combo };
-  }, [grid, activePiece, nextPiece, gameOver, gameClear, isExtraStage, turnCount, isPaused, level, isMuted, linesCleared, bombs, score, combo]);
+    stateRef.current = { grid, activePiece, nextPiece, gameOver, gameClear, isExtraStage, turnCount, isPaused, level, isMuted, linesCleared, bombs, score, combo, isStarting, rouletteState };
+  }, [grid, activePiece, nextPiece, gameOver, gameClear, isExtraStage, turnCount, isPaused, level, isMuted, linesCleared, bombs, score, combo, isStarting, rouletteState]);
+
+  useEffect(() => {
+    const unlocked = localStorage.getItem('neotetra_extra_unlocked') === 'true';
+    setExtraUnlocked(unlocked);
+  }, []);
 
   const addLog = useCallback((msg, type = "info") => {
     setLogs(prev => [ { msg, type, time: Date.now() }, ...prev.slice(0, 4) ]);
@@ -88,25 +104,37 @@ const App = () => {
     }
   };
 
-  // City Pop Algorithm Music (Refined)
+  const playVoice = useCallback((text) => {
+    if (stateRef.current.isMuted) return;
+    const synth = window.speechSynthesis;
+    synth.cancel(); // Prevent overlapping
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = 'ja-JP';
+    utter.pitch = 0.8; // Electronic/Robotic vibe
+    utter.rate = 1.0;
+    synth.speak(utter);
+  }, []);
+
+  // CLUB MUSIC BGM Algorithm
   const playAlgorithmicMusic = useCallback(() => {
-    if (!audioCtx.current || stateRef.current.isMuted || stateRef.current.isPaused || stateRef.current.gameOver || (stateRef.current.gameClear && !stateRef.current.isExtraStage)) return;
+    if (!audioCtx.current || stateRef.current.isMuted || stateRef.current.isPaused || stateRef.current.gameOver || stateRef.current.gameClear || stateRef.current.isStarting) return;
     const ctx = audioCtx.current;
     const time = ctx.currentTime;
     const step = beatCount.current % 16;
     
-    // Kick & Snare (Disco/Funk pattern)
-    if (step === 0 || step === 8 || step === 11) {
+    // Club Kick (4-on-the-floor)
+    if (step % 4 === 0) {
       const osc = ctx.createOscillator();
       const g = ctx.createGain();
-      osc.frequency.setValueAtTime(70, time);
-      osc.frequency.exponentialRampToValueAtTime(0.01, time + 0.15);
-      g.gain.setValueAtTime(0.2, time);
-      g.gain.exponentialRampToValueAtTime(0.01, time + 0.15);
+      osc.frequency.setValueAtTime(120, time);
+      osc.frequency.exponentialRampToValueAtTime(0.01, time + 0.2);
+      g.gain.setValueAtTime(0.5, time);
+      g.gain.exponentialRampToValueAtTime(0.01, time + 0.2);
       osc.connect(g); g.connect(ctx.destination);
-      osc.start(time); osc.stop(time + 0.15);
+      osc.start(time); osc.stop(time + 0.2);
     }
     
+    // Clap / Snare
     if (step === 4 || step === 12) {
       const bufferSize = ctx.sampleRate * 0.1;
       const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
@@ -116,65 +144,66 @@ const App = () => {
       noise.buffer = buffer;
       const bp = ctx.createBiquadFilter();
       bp.type = 'bandpass';
-      bp.frequency.setValueAtTime(1500, time);
+      bp.frequency.setValueAtTime(1200, time);
       const g = ctx.createGain();
-      g.gain.setValueAtTime(0.1, time);
+      g.gain.setValueAtTime(0.2, time);
       g.gain.exponentialRampToValueAtTime(0.01, time + 0.1);
       noise.connect(bp); bp.connect(g); g.connect(ctx.destination);
       noise.start(time);
     }
 
-    // Cutting Guitar (High-Pass Noise)
-    if (step % 2 !== 0 || step % 4 === 2) {
+    // Hi-hats
+    if (step % 2 !== 0) {
       const bufferSize = ctx.sampleRate * 0.05;
       const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
       const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * 0.5;
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
       const noise = ctx.createBufferSource();
       noise.buffer = buffer;
       const hp = ctx.createBiquadFilter();
       hp.type = 'highpass';
-      hp.frequency.setValueAtTime(4000, time);
+      hp.frequency.setValueAtTime(8000, time);
       const g = ctx.createGain();
-      g.gain.setValueAtTime(0.04, time);
+      g.gain.setValueAtTime(0.05, time);
       g.gain.exponentialRampToValueAtTime(0.001, time + 0.05);
       noise.connect(hp); hp.connect(g); g.connect(ctx.destination);
       noise.start(time);
     }
 
-    // Walking Bass (Octave Slap Style)
-    const bassRoot = [55, 55, 65.41, 65.41, 73.42, 73.42, 82.41, 82.41];
-    const bassNote = step % 2 === 0 ? bassRoot[Math.floor(step/2)] : bassRoot[Math.floor(step/2)] * 2;
-    const bass = ctx.createOscillator();
-    const bg = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-    bass.type = 'square';
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(800, time);
-    filter.frequency.exponentialRampToValueAtTime(100, time + 0.15);
-    bass.frequency.setValueAtTime(bassNote, time);
-    bg.gain.setValueAtTime(0.06, time);
-    bg.gain.exponentialRampToValueAtTime(0.01, time + 0.15);
-    bass.connect(filter); filter.connect(bg); bg.connect(ctx.destination);
-    bass.start(time); bass.stop(time + 0.15);
+    // Heavy Club Bass
+    const bassScale = [41.20, 41.20, 48.99, 48.99, 55, 55, 65.41, 65.41]; 
+    const bassNote = bassScale[Math.floor(step/2)];
+    if (step % 2 === 1) {
+      const bass = ctx.createOscillator();
+      const bg = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+      bass.type = 'sawtooth';
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(400, time);
+      filter.frequency.exponentialRampToValueAtTime(50, time + 0.15);
+      bass.frequency.setValueAtTime(bassNote, time);
+      bg.gain.setValueAtTime(0.2, time);
+      bg.gain.exponentialRampToValueAtTime(0.01, time + 0.15);
+      bass.connect(filter); filter.connect(bg); bg.connect(ctx.destination);
+      bass.start(time); bass.stop(time + 0.15);
+    }
 
-    // Mellow E.Piano with Syncopation
-    if (step === 2 || step === 7 || step === 10) {
+    // FM Synth Arpeggio
+    if (step === 0 || step === 8 || step === 10) {
       const chords = [
-        [261.63, 329.63, 392.00, 493.88], // CM7
-        [220.00, 261.63, 329.63, 392.00], // Am7
-        [293.66, 349.23, 440.00, 523.25]  // Dm7
+        [261.63, 329.63, 392.00], // C
+        [220.00, 261.63, 329.63], // Am
       ];
-      const chord = chords[Math.floor(beatCount.current / 64) % chords.length] || chords[0];
+      const chord = chords[Math.floor(beatCount.current / 32) % chords.length];
       chord.forEach(f => {
         const osc = ctx.createOscillator();
         const g = ctx.createGain();
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(f, time);
-        g.gain.setValueAtTime(0.02, time);
-        g.gain.exponentialRampToValueAtTime(0.001, time + 0.5);
+        osc.frequency.setValueAtTime(f * 2, time);
+        g.gain.setValueAtTime(0.03, time);
+        g.gain.exponentialRampToValueAtTime(0.001, time + 0.3);
         osc.connect(g); g.connect(ctx.destination);
-        osc.start(time); osc.stop(time + 0.5);
+        osc.start(time); osc.stop(time + 0.3);
       });
     }
 
@@ -201,6 +230,19 @@ const App = () => {
     const ctx = audioCtx.current;
     const time = ctx.currentTime;
     
+    if (type === 'start') {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(220, time);
+      osc.frequency.linearRampToValueAtTime(880, time + 0.5);
+      g.gain.setValueAtTime(0.2, time);
+      g.gain.exponentialRampToValueAtTime(0.001, time + 0.5);
+      osc.connect(g); g.connect(ctx.destination);
+      osc.start(time); osc.stop(time + 0.5);
+      return;
+    }
+
     if (type === 'gameClear') {
       const chords = [523.25, 659.25, 783.99, 1046.50]; 
       chords.forEach((f, i) => {
@@ -328,7 +370,6 @@ const App = () => {
     const emptyRows = gridToShuffle.filter(row => row.every(cell => cell === 0));
     let filledRows = gridToShuffle.filter(row => row.some(cell => cell !== 0));
     
-    // 行内のセルをシャッフル
     filledRows = filledRows.map(row => {
         const newRow = [...row];
         for (let i = newRow.length - 1; i > 0; i--) {
@@ -338,7 +379,6 @@ const App = () => {
         return newRow;
     });
     
-    // 行の順序をシャッフル
     for (let i = filledRows.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [filledRows[i], filledRows[j]] = [filledRows[j], filledRows[i]];
@@ -348,7 +388,7 @@ const App = () => {
   };
 
   const lockPiece = useCallback(() => {
-    const { grid: currentGrid, activePiece: piece, level: currentLevel, linesCleared: currentLines, score: currentScore, bombs: currentBombs, combo: currentCombo, nextPiece: nPieceType, isExtraStage, turnCount } = stateRef.current;
+    const { grid: currentGrid, activePiece: piece, level: currentLevel, linesCleared: currentLines, score: currentScore, bombs: currentBombs, combo: currentCombo, nextPiece: nPieceType, isExtraStage, turnCount, rouletteState: rState } = stateRef.current;
     if (!piece) return;
 
     const newGrid = currentGrid.map(row => [...row]);
@@ -366,6 +406,7 @@ const App = () => {
     newGrid.forEach((row, y) => { if (row.every(cell => cell !== 0)) rowsToClear.push(y); });
     
     let finalGrid = newGrid;
+    let nextTurn = turnCount + 1;
 
     if (rowsToClear.length > 0) {
       const newCombo = currentCombo + 1;
@@ -393,7 +434,9 @@ const App = () => {
       playCyberSFX(isMega ? 'mega' : 'standard');
       setTimeout(() => setFeedback(null), 1000);
 
-      if (Math.floor(newScore / 2000) > Math.floor(lastBombScoreRef.current / 2000)) {
+      // ボムの出現条件（エクストラステージはノーマルの2倍: 4000点ごと）
+      const bombThreshold = isExtraStage ? 4000 : 2000;
+      if (Math.floor(newScore / bombThreshold) > Math.floor(lastBombScoreRef.current / bombThreshold)) {
         if (currentBombs < 3) {
           setBombs(prev => prev + 1);
           addLog("BOMB MODULE ACTIVATED", "success");
@@ -415,43 +458,80 @@ const App = () => {
         }
       }
 
-      if (!isExtraStage) {
-        const newLevel = Math.floor(newTotalLines / 10) + 1;
-        if (newLevel > currentLevel) {
-          setLevel(newLevel);
-          if (newLevel >= 10) {
-            setGameClear(true);
-            playCyberSFX('gameClear');
-            addLog("PROTOCOL COMPLETE: CITY RESTORED", "success");
-          } else {
-            setFeedback({ text: `PHASE ${newLevel}`, type: 'mega', id: Math.random() });
-            addLog(`PHASE SHIFT: ${newLevel}`, "success");
-            setTimeout(() => setFeedback(null), 1000);
+      const newLevel = Math.floor(newTotalLines / 10) + 1;
+      const targetLevel = isExtraStage ? 15 : 10;
+      
+      if (newLevel > currentLevel) {
+        setLevel(newLevel);
+        if (newLevel >= targetLevel) {
+          setGameClear(true);
+          playCyberSFX('gameClear');
+          addLog("PROTOCOL COMPLETE: CITY RESTORED", "success");
+          if (!isExtraStage) {
+            setExtraUnlocked(true);
+            localStorage.setItem('neotetra_extra_unlocked', 'true');
           }
+        } else {
+          setFeedback({ text: `PHASE ${newLevel}`, type: 'mega', id: Math.random() });
+          addLog(`PHASE SHIFT: ${newLevel}`, "success");
+          setTimeout(() => setFeedback(null), 1000);
         }
       }
     } else {
       setCombo(0);
     }
     
-    // EXTRA STAGE SHUFFLE LOGIC
+    // EXTRA STAGE SHUFFLE & ROULETTE LOGIC
     if (isExtraStage) {
-      const nextTurn = turnCount + 1;
-      setTurnCount(nextTurn);
-      if (nextTurn % 3 === 0) {
+      // Shuffle Event
+      if (nextTurn > 0 && nextTurn % 10 === 0) {
         finalGrid = shuffleGrid(finalGrid);
+        playVoice("フハハ〜");
         addLog("SYSTEM HACKED: SHUFFLE TIME!", "warning");
         playCyberSFX('shuffle');
         setFeedback({ text: 'SHUFFLE!!', type: 'mega', id: Math.random() });
         setTimeout(() => setFeedback(null), 1000);
       }
+
+      // Roulette Event Update
+      let newRouletteState = { ...rState };
+      if (newRouletteState.remaining > 0) {
+         newRouletteState.remaining -= 1;
+         if (newRouletteState.remaining === 0) {
+            newRouletteState.active = false;
+            newRouletteState.piece = null;
+            addLog("ROULETTE EFFECT ENDED", "info");
+         }
+      }
+
+      // Roulette Trigger
+      if (nextTurn === newRouletteState.nextTrigger && newRouletteState.remaining === 0) {
+         const newPiece = RANDOM_TETROMINO();
+         newRouletteState = {
+           active: true,
+           piece: newPiece,
+           remaining: Math.floor(Math.random() * 2) + 2, // 2 or 3 turns
+           nextTrigger: nextTurn + Math.floor(Math.random() * 6) + 5 // 5-10 turns later
+         };
+         addLog(`ROULETTE: ${newPiece} BLOCKS INCOMING`, "warning");
+         setFeedback({ text: 'ROULETTE!!', type: 'mega', id: Math.random() });
+         setTimeout(() => setFeedback(null), 1000);
+      }
+      
+      setRouletteState(newRouletteState);
+      setTurnCount(nextTurn);
+    } else {
+      setTurnCount(nextTurn);
     }
 
     setGrid(finalGrid);
 
     if (stateRef.current.gameClear && !isExtraStage) return;
 
-    const nextP = createPiece(nPieceType);
+    // Determine next piece considering roulette
+    const spawnType = (rState.remaining > 0 && rState.piece) ? rState.piece : nPieceType;
+    const nextP = createPiece(spawnType);
+    
     if (!nextP || checkCollision(nextP, nextP.pos, nextP.shape, finalGrid)) {
       setGameOver(true);
       playSystemDownSound();
@@ -459,13 +539,17 @@ const App = () => {
       setActivePiece(null);
     } else {
       setActivePiece(nextP);
-      setNextPiece(RANDOM_TETROMINO());
+      if (rState.remaining > 1 && rState.piece) {
+        setNextPiece(rState.piece);
+      } else {
+        setNextPiece(RANDOM_TETROMINO());
+      }
     }
-  }, [createPiece, checkCollision, addLog, spawnParticles, playCyberSFX, playSystemDownSound]);
+  }, [createPiece, checkCollision, addLog, spawnParticles, playCyberSFX, playSystemDownSound, playVoice]);
 
   const drop = useCallback(() => {
     const piece = stateRef.current.activePiece;
-    if (!piece || stateRef.current.gameOver || (stateRef.current.gameClear && !stateRef.current.isExtraStage) || stateRef.current.isPaused) return;
+    if (!piece || stateRef.current.gameOver || (stateRef.current.gameClear && !stateRef.current.isExtraStage) || stateRef.current.isPaused || stateRef.current.isStarting) return;
     const newPos = { ...piece.pos, y: piece.pos.y + 1 };
     if (!checkCollision(piece, newPos)) {
       setActivePiece(prev => prev ? ({ ...prev, pos: newPos }) : null);
@@ -475,6 +559,13 @@ const App = () => {
   }, [checkCollision, lockPiece]);
 
   const resetGame = useCallback((isExtra = false) => {
+    initAudio();
+    setIsStarting(true);
+    
+    // Play electronic voice and start sound exactly together
+    playVoice("GAME START");
+    playCyberSFX('start');
+
     setGrid(Array.from({ length: ROWS }, () => Array(COLS).fill(0)));
     setLinesCleared(0);
     setScore(0);
@@ -484,24 +575,39 @@ const App = () => {
     lastBombScoreRef.current = 0;
     lastRepairScoreRef.current = 0;
     setLevel(isExtra ? 10 : 1);
-    setBombs(isExtra ? 3 : 1);
+    setBombs(1);
     setGameOver(false);
     setGameClear(false);
     setIsPaused(false);
     setParticles([]);
     setFlashes([]);
+    
+    setRouletteState({
+      active: false,
+      piece: null,
+      remaining: 0,
+      nextTrigger: Math.floor(Math.random() * 6) + 5
+    });
+
     const firstType = RANDOM_TETROMINO();
     const nextType = RANDOM_TETROMINO();
     setActivePiece(createPiece(firstType));
     setNextPiece(nextType);
     addLog(isExtra ? "EXTRA STAGE INITIALIZED" : "SYSTEM REBOOT SUCCESSFUL", "success");
+    
     lastTimeRef.current = performance.now();
     dropCounterRef.current = 0;
-  }, [createPiece, addLog]);
+
+    // 2秒間 GAME START表示
+    setTimeout(() => {
+      setIsStarting(false);
+      lastTimeRef.current = performance.now();
+    }, 2000);
+  }, [createPiece, addLog, playVoice, playCyberSFX]);
 
   const useBomb = useCallback(() => {
-    const { bombs: currentBombs, gameOver: isOver, gameClear: isClear, isExtraStage: extra, isPaused: paused, grid: currentGrid } = stateRef.current;
-    if (currentBombs <= 0 || isOver || (isClear && !extra) || paused) return;
+    const { bombs: currentBombs, gameOver: isOver, gameClear: isClear, isExtraStage: extra, isPaused: paused, grid: currentGrid, isStarting: starting } = stateRef.current;
+    if (currentBombs <= 0 || isOver || (isClear && !extra) || paused || starting) return;
     setBombs(prev => prev - 1);
     addLog("CRITICAL: FULL SYSTEM DEFRAG", "error");
     playCyberSFX('bomb');
@@ -535,21 +641,21 @@ const App = () => {
 
   const handleMove = useCallback((dir) => {
     const piece = stateRef.current.activePiece;
-    if (!piece || stateRef.current.gameOver || (stateRef.current.gameClear && !stateRef.current.isExtraStage) || stateRef.current.isPaused) return;
+    if (!piece || stateRef.current.gameOver || (stateRef.current.gameClear && !stateRef.current.isExtraStage) || stateRef.current.isPaused || stateRef.current.isStarting) return;
     const newPos = { ...piece.pos, x: piece.pos.x + dir };
     if (!checkCollision(piece, newPos)) setActivePiece(prev => prev ? ({ ...prev, pos: newPos }) : null);
   }, [checkCollision]);
 
   const handleRotate = useCallback(() => {
     const piece = stateRef.current.activePiece;
-    if (!piece || stateRef.current.gameOver || (stateRef.current.gameClear && !stateRef.current.isExtraStage) || stateRef.current.isPaused) return;
+    if (!piece || stateRef.current.gameOver || (stateRef.current.gameClear && !stateRef.current.isExtraStage) || stateRef.current.isPaused || stateRef.current.isStarting) return;
     const newShape = rotate(piece.shape);
     if (!checkCollision(piece, piece.pos, newShape)) setActivePiece(prev => prev ? ({ ...prev, shape: newShape }) : null);
   }, [checkCollision]);
 
   const hardDrop = useCallback(() => {
     const piece = stateRef.current.activePiece;
-    if (!piece || stateRef.current.gameOver || (stateRef.current.gameClear && !stateRef.current.isExtraStage) || stateRef.current.isPaused) return;
+    if (!piece || stateRef.current.gameOver || (stateRef.current.gameClear && !stateRef.current.isExtraStage) || stateRef.current.isPaused || stateRef.current.isStarting) return;
     let newY = piece.pos.y;
     while (!checkCollision(piece, { ...piece.pos, y: newY + 1 })) newY++;
     const flashId = Math.random();
@@ -565,7 +671,7 @@ const App = () => {
     const deltaTime = time - lastTimeRef.current;
     lastTimeRef.current = time;
 
-    if (!stateRef.current.isPaused && !stateRef.current.gameOver && (!stateRef.current.gameClear || stateRef.current.isExtraStage)) {
+    if (!stateRef.current.isPaused && !stateRef.current.gameOver && (!stateRef.current.gameClear || stateRef.current.isExtraStage) && !stateRef.current.isStarting) {
       dropCounterRef.current += deltaTime;
       const baseInterval = stateRef.current.isExtraStage ? 250 : Math.max(80, 800 - (stateRef.current.level - 1) * 80);
       const dropInterval = isSoftDropping.current ? 40 : baseInterval;
@@ -584,14 +690,15 @@ const App = () => {
   }, [drop, playAlgorithmicMusic]);
 
   useEffect(() => {
-    if (!activePiece && !gameOver && (!gameClear || isExtraStage)) setActivePiece(createPiece(RANDOM_TETROMINO()));
+    if (!activePiece && !gameOver && (!gameClear || isExtraStage) && !isStarting) setActivePiece(createPiece(RANDOM_TETROMINO()));
     requestRef.current = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(requestRef.current);
-  }, [animate, activePiece, gameOver, gameClear, isExtraStage, createPiece]);
+  }, [animate, activePiece, gameOver, gameClear, isExtraStage, createPiece, isStarting]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
       initAudio();
+      if (stateRef.current.isStarting) return;
       if (stateRef.current.gameOver || (stateRef.current.gameClear && !stateRef.current.isExtraStage)) {
         if (e.key === 'Enter') resetGame(false);
         return;
@@ -619,7 +726,7 @@ const App = () => {
   };
 
   const onTouchMove = (e) => {
-    if (stateRef.current.gameOver || (stateRef.current.gameClear && !stateRef.current.isExtraStage) || stateRef.current.isPaused) return;
+    if (stateRef.current.gameOver || (stateRef.current.gameClear && !stateRef.current.isExtraStage) || stateRef.current.isPaused || stateRef.current.isStarting) return;
     const touch = e.touches[0];
     const dx = touch.clientX - lastMoveXRef.current;
     const dy = touch.clientY - touchStartRef.current.y;
@@ -704,7 +811,9 @@ const App = () => {
             </div>
           </div>
           <div className="flex-1 bg-white/[0.03] border border-white/10 rounded-2xl p-2 backdrop-blur-md flex flex-col items-center justify-center">
-             <span className="text-[8px] font-black tracking-[0.2em] uppercase opacity-40 mb-1">Next</span>
+             <span className={`text-[8px] font-black tracking-[0.2em] uppercase mb-1 transition-colors ${rouletteState.remaining > 0 ? 'text-rose-500 animate-pulse' : 'opacity-40'}`}>
+                {rouletteState.remaining > 0 ? 'ROULETTE' : 'Next'}
+             </span>
              <div className="relative w-10 h-10 transform scale-75">
                 {nextPiece && SHAPES[nextPiece].map((row, y) => row.map((val, x) => (
                   val ? <div key={`${x}-${y}`} className="absolute rounded-[2px]" style={{ left: `${(nextOffset.x + x) * 25}%`, top: `${(nextOffset.y + y) * 25}%`, width: '25%', height: '25%', backgroundColor: COLORS[nextPiece], boxShadow: `0 0 10px ${COLORS[nextPiece]}88` }} /> : null
@@ -739,39 +848,43 @@ const App = () => {
                 </div>
               </div>
             )}
-          </div>
-
-          {gameClear && !isExtraStage && (
-            <div className="absolute inset-0 z-[100] flex items-center justify-center bg-cyan-950/90 backdrop-blur-2xl animate-in fade-in duration-500">
-              <div className="flex flex-col items-center w-full max-w-xs text-center border-4 border-cyan-400/30 p-6 rounded-3xl bg-black/50">
-                <h2 className="text-4xl font-black italic mb-2 text-cyan-400 uppercase drop-shadow-[0_0_20px_#22d3ee] tracking-tighter">CITY RESTORED</h2>
-                <p className="text-[10px] text-cyan-200/60 mb-8 tracking-[0.2em] uppercase font-bold">Protocol Success: System Stable</p>
-                <div className="grid grid-cols-2 gap-8 w-full mb-10 font-mono">
-                  <div className="flex flex-col"><span className="text-[8px] uppercase tracking-widest opacity-40 mb-1">Final Score</span><span className="text-white text-2xl font-black">{score.toLocaleString()}</span></div>
-                  <div className="flex flex-col"><span className="text-[8px] uppercase tracking-widest opacity-40 mb-1">Nodes</span><span className="text-white text-2xl font-black">{linesCleared}</span></div>
-                </div>
-                <div className="flex flex-col gap-3 w-full">
-                  <button onClick={() => resetGame(false)} className="w-full py-3 bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-black tracking-[0.3em] rounded-xl active:scale-95 transition-all shadow-[0_15px_40px_rgba(34,211,238,0.4)]">REPLAY</button>
-                  <button onClick={() => resetGame(true)} className="w-full py-3 bg-rose-600 hover:bg-rose-500 text-white text-sm font-black tracking-[0.3em] rounded-xl active:scale-95 transition-all shadow-[0_15px_40px_rgba(244,63,94,0.4)]">EXTRA STAGE</button>
+            
+            {/* GAME START ANIMATION */}
+            {isStarting && (
+              <div className="absolute inset-0 flex items-center justify-center z-[100] bg-black/60 backdrop-blur-sm">
+                <div className="text-5xl font-black italic tracking-tighter text-cyan-400 drop-shadow-[0_0_20px_#22d3ee] animate-pulse">
+                  GAME START
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
-          {gameOver && (!gameClear || isExtraStage) && (
+          {(gameOver || gameClear) && !isStarting && (
             <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-2xl animate-in fade-in duration-500">
               <div className="flex flex-col items-center w-full max-w-xs text-center">
-                <h2 className="text-4xl font-black italic mb-10 text-rose-500 uppercase drop-shadow-[0_0_20px_#f43f5e] tracking-tighter">GAME OVER</h2>
+                <h2 className={`text-4xl font-black italic mb-10 uppercase tracking-tighter ${gameClear ? 'text-cyan-400 drop-shadow-[0_0_20px_#22d3ee]' : 'text-rose-500 drop-shadow-[0_0_20px_#f43f5e]'}`}>
+                  {gameClear ? 'MISSION CLEAR' : 'GAME OVER'}
+                </h2>
                 <div className="grid grid-cols-2 gap-8 w-full mb-12 font-mono">
                   <div className="flex flex-col"><span className="text-[8px] uppercase tracking-widest opacity-40 mb-1">Final Score</span><span className="text-white text-2xl font-black">{score.toLocaleString()}</span></div>
                   <div className="flex flex-col"><span className="text-[8px] uppercase tracking-widest opacity-40 mb-1">Max Phase</span><span className="text-white text-2xl font-black">{level}</span></div>
                 </div>
-                <button onClick={() => resetGame(false)} className="w-full py-5 bg-rose-600 hover:bg-rose-500 text-white text-lg font-black tracking-[0.3em] rounded-2xl active:scale-95 transition-all shadow-[0_15px_40px_rgba(244,63,94,0.4)]">RETRY</button>
+                
+                <div className="flex flex-col gap-4 w-full">
+                    <button onClick={() => resetGame(false)} className="w-full py-4 bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-black tracking-[0.3em] rounded-2xl active:scale-95 transition-all shadow-[0_15px_40px_rgba(34,211,238,0.4)]">
+                        RETRY
+                    </button>
+                    {extraUnlocked && (
+                        <button onClick={() => resetGame(true)} className="w-full py-4 bg-rose-600 hover:bg-rose-500 text-white text-sm font-black tracking-[0.3em] rounded-2xl active:scale-95 transition-all shadow-[0_15px_40px_rgba(244,63,94,0.4)]">
+                            EXTRA STAGE
+                        </button>
+                    )}
+                </div>
               </div>
             </div>
           )}
 
-          {isPaused && !gameOver && (!gameClear || isExtraStage) && (
+          {isPaused && !gameOver && (!gameClear || isExtraStage) && !isStarting && (
             <div className="absolute inset-0 z-[70] flex flex-col items-center justify-center bg-black/60 backdrop-blur-xl">
               <button onClick={() => setIsPaused(false)} className="w-24 h-24 flex items-center justify-center rounded-3xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 active:scale-90 transition-all">
                 <Play size={48} fill="currentColor" />
@@ -803,7 +916,7 @@ const App = () => {
       <footer className="w-full max-w-md px-6 pb-6 pt-2">
         <div className="flex justify-between items-center text-[7px] font-mono opacity-20 uppercase tracking-[0.4em]">
           <span>© 2026 Phantom Labs</span>
-          <span>v2.3.0-ELITE</span>
+          <span>v2.4.0-ELITE</span>
         </div>
       </footer>
     </div>
